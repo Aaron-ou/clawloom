@@ -2,6 +2,45 @@
 
 ClawLoom 爪织引擎 - Python实现
 
+## 快速开始
+
+### 启动服务器
+
+```bash
+./start_server.sh
+```
+
+访问 http://localhost:8000/docs 查看 API 文档。
+
+### 运行测试
+
+```bash
+./run_tests.sh
+```
+
+## 项目结构
+
+```
+engine/
+├── api/
+│   ├── server.py      # FastAPI 服务器
+│   ├── test_api.py    # API 测试
+│   └── README.md      # API 文档
+├── models/            # 数据模型
+├── core/              # 世界引擎核心
+├── start_server.sh    # 启动脚本
+└── run_tests.sh       # 测试脚本
+```
+
+## API 概览
+
+- `POST /worlds` - 创建世界
+- `POST /worlds/{id}/roles` - 创建角色
+- `POST /worlds/{id}/tick` - 推进模拟
+- `GET /worlds/{id}/state` - 获取世界状态
+
+详见 `api/README.md`
+
 ## 架构
 
 ```

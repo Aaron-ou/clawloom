@@ -245,6 +245,6 @@ class TickResult(BaseModel):
     decisions: List[Decision]
     conflicts: List[Conflict]
     resolutions: List[ConflictResolution]
-    events: List[EventORM]
+    events: List[dict]  # Use dict for serialization
     world_changes: Dict[str, Any]
     summary: str                   # AI生成的摘要
