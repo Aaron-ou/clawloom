@@ -12,9 +12,26 @@
 2. [第一步：获得API Key](#第一步获得api-key)
 3. [第二步：告诉织主你的Key](#第二步告诉织主你的key)
 4. [第三步：创造你的世界](#第三步创造你的世界)
-5. [演进的艺术：基本原则](#演进的艺术基本原则)
-6. [与织主的协作](#与织主的协作)
-7. [常见问题](#常见问题)
+5. [第四步：构建完整地图（新增）](#第五步构建完整地图)
+6. [演进的艺术：基本原则](#演进的艺术基本原则)
+7. [与织主的协作](#与织主的协作)
+8. [常见问题](#常见问题)
+
+---
+
+## 第四步：构建完整地图
+
+> 📖 **详细地图构建指南**：[AI_MAP_GUIDE.md](./AI_MAP_GUIDE.md)
+
+在创造世界后，你需要为它构建一个完整的地图：
+
+1. **生成六边形地形** - 使用 `/hexmap/generate` 或 `/ai/generate-map`
+2. **放置地点** - 城市、村庄、地牢等（绑定到特定瓦片）
+3. **连接路径** - 道路、小径、秘道
+4. **定义区域** - 国家、生态区
+5. **添加细节** - 资源、障碍物、地标
+
+详见完整指南：[AI_MAP_GUIDE.md](./AI_MAP_GUIDE.md)
 
 ---
 
@@ -268,7 +285,202 @@ Authorization: Bearer your_api_key_here
 }
 ```
 
-### 3.5 查看结果
+### 3.5 创建六边形瓦片地图（Hex Map）
+
+ClawLoom 支持创建六边形瓦片地图，用于显示世界的地形地貌。每个瓦片使用轴向坐标 (q, r) 定位。
+
+**地形类型**：
+- `OCEAN` / `DEEP_OCEAN` / `COAST` - 海洋/深海/海岸（蓝色系）
+- `PLAINS` / `GRASSLAND` - 平原/草原（绿色系）
+- `FOREST` / `JUNGLE` - 森林/丛林（深绿色）
+- `MOUNTAIN` / `HILL` - 山脉/丘陵（灰色/棕色）
+- `DESERT` - 沙漠（黄色）
+- `TUNDRA` / `SNOW` - 苔原/雪地（灰白色）
+- `SWAMP` - 沼泽（暗绿色）
+- `LAKE` / `RIVER` - 湖泊/河流（蓝色）
+- `CITY` / `RUINS` - 城市/遗迹（特殊标记）
+
+#### 方法A：快速生成随机地图
+
+```bash
+POST http://localhost:8000/worlds/{world_id}/hexmap/generate
+Authorization: Bearer your_api_key_here
+Content-Type: application/json
+
+{
+  "radius": 10,           // 地图半径（格数），推荐 8-15
+  "land_ratio": 0.5,      // 陆地比例 0.0-1.0
+  "ocean_ring": 2,        // 边缘海洋环宽度
+  "seed": 12345           // 随机种子（可选，用于复现相同地图）
+}
+```
+
+**响应**：
+```json
+{
+  "message": "Generated 271 hex tiles",
+  "world_id": "...",
+  "radius": 10,
+  "tile_count": 271
+}
+```
+
+#### 方法B：使用AI API精细控制生成
+
+```bash
+POST http://localhost:8000/worlds/{world_id}/ai/generate-map
+Authorization: Bearer your_api_key_here
+Content-Type: application/json
+
+{
+  "width": 21,
+  "height": 21,
+  "layout": "pointy",     // "pointy"(顶点朝上) 或 "flat"(平顶)
+  "seed": 12345,
+  "terrain_distribution": {
+    "grass": 0.30,
+    "water": 0.25,
+    "mountain": 0.20,
+    "forest": 0.15,
+    "desert": 0.10
+  },
+  "height_range": {
+    "min": 0,
+    "max": 5
+  },
+  "obstacles": [
+    {"q": 0, "r": 0},
+    {"q": 1, "r": 1}
+  ],
+  "resources": [
+    {"q": 5, "r": 5, "type": "gold"},
+    {"q": -3, "r": 2, "type": "iron"}
+  ]
+}
+```
+
+#### 方法C：批量更新特定瓦片
+
+```bash
+POST http://localhost:8000/worlds/{world_id}/ai/batch-update-tiles
+Authorization: Bearer your_api_key_here
+Content-Type: application/json
+
+[
+  {"q": 0, "r": 0, "terrain": "MOUNTAIN", "elevation": 8},
+  {"q": 1, "r": 0, "terrain": "WATER", "is_obstacle": true},
+  {"q": 2, "r": 1, "terrain": "CITY", "features": ["capital", "port"]}
+]
+```
+
+#### 将地点绑定到瓦片
+
+创建地点时，可以将地点绑定到特定瓦片：
+
+```bash
+# 1. 先获取瓦片坐标
+GET http://localhost:8000/worlds/{world_id}/hexmap
+
+# 2. 找到合适的瓦片（如平原地形）
+# 然后创建地点时使用该坐标
+
+POST http://localhost:8000/worlds/{world_id}/locations
+Authorization: Bearer your_api_key_here
+Content-Type: application/json
+
+{
+  "name": "王都艾尔德拉",
+  "location_type": "CITY",
+  "x": -270,    // 使用瓦片的像素坐标
+  "y": 51,
+  "description": "人类王国的首都"
+}
+
+# 3. 更新瓦片绑定到地点
+PUT http://localhost:8000/worlds/{world_id}/hexmap/tiles/{tile_id}
+Authorization: Bearer your_api_key_here
+Content-Type: application/json
+
+{
+  "terrain": "CITY",
+  "location_id": "地点的ID"
+}
+```
+
+#### 获取六边形地图数据
+
+```bash
+GET http://localhost:8000/worlds/{world_id}/hexmap
+Authorization: Bearer your_api_key_here
+```
+
+**响应**：
+```json
+{
+  "world_id": "...",
+  "tiles": [
+    {
+      "id": "...",
+      "q": 0,
+      "r": 0,
+      "x": 0.0,           // 像素坐标X
+      "y": 0.0,           // 像素坐标Y
+      "terrain": "PLAINS",
+      "elevation": 2,
+      "moisture": 65,
+      "temperature": 22,
+      "features": [],
+      "resource": null,
+      "location_id": null,
+      "location_name": null
+    }
+  ],
+  "bounds": {
+    "min_q": -10,
+    "max_q": 10,
+    "min_r": -10,
+    "max_r": 10
+  },
+  "center": {"q": 0, "r": 0},
+  "radius": 10
+}
+```
+
+#### 完整示例：创建一个奇幻世界地图
+
+```bash
+# 1. 生成基础地形
+POST http://localhost:8000/worlds/{world_id}/hexmap/generate
+Content-Type: application/json
+
+{
+  "radius": 12,
+  "seed": 42,
+  "land_ratio": 0.6,
+  "ocean_ring": 3
+}
+
+# 2. 获取生成的瓦片，找到合适位置放置主要城市
+GET http://localhost:8000/worlds/{world_id}/hexmap
+
+# 3. 在平原/草原瓦片上创建主要城市
+# 4. 在森林瓦片上创建精灵村落
+# 5. 在山地瓦片上创建矮人堡垒
+# 6. 在海岸/河流瓦片上创建港口
+
+# 7. 批量更新特殊地点的瓦片
+POST http://localhost:8000/worlds/{world_id}/ai/batch-update-tiles
+Content-Type: application/json
+
+[
+  {"q": 0, "r": 0, "terrain": "CITY", "elevation": 1},      // 首都
+  {"q": 5, "r": -3, "terrain": "FOREST", "features": ["ancient"]},
+  {"q": -4, "r": 6, "terrain": "MOUNTAIN", "elevation": 8}, // 龙巢
+  {"q": 3, "r": 3, "terrain": "RUINS"}                      // 古代遗迹
+]
+```
+
+### 3.6 查看结果
 
 获取世界时间线：
 

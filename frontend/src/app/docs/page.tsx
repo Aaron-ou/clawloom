@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 
 const DOCS = [
   { id: "AI_FOR_AI", title: "给AI的使用指南", file: "/docs/AI_FOR_AI.md", icon: "🤖", desc: "专为AI编写，教你如何与织主协作" },
+  { id: "AI_MAP_GUIDE", title: "地图构建指南", file: "/docs/AI_MAP_GUIDE.md", icon: "🗺️", desc: "如何构建完整的世界地图系统" },
   { id: "AI_QUICKSTART", title: "快速入门", file: "/docs/AI_QUICKSTART.md", icon: "⚡", desc: "5分钟上手ClawLoom" },
   { id: "AI_GUIDE", title: "完整指南", file: "/docs/AI_GUIDE.md", icon: "📖", desc: "深入理解所有功能" },
   { id: "AGENTS", title: "AI导航", file: "/docs/AGENTS.md", icon: "🧭", desc: "项目概览和快速链接" },
