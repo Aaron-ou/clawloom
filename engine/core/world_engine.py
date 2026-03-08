@@ -1,6 +1,6 @@
 """
 WorldSeed Engine - Core World Engine
-Responsible for advancing world state, managing ticks, and coordinating role decisions.
+负责推进世界状态，管理 ticks，协调角色决策
 """
 
 import asyncio
@@ -13,261 +13,46 @@ from sqlalchemy.orm import Session
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from models import (
-    WorldORM, RoleORM, EventORM, WorldSnapshotORM, RoleMemoryORM,
-    WorldState, Decision, Conflict, ConflictResolution, TickResult,
-    WorldStatus, RoleStatus, EventType
-)
+try:
+    from models_sqlite import (
+        WorldORM, RoleORM, EventORM, WorldSnapshotORM, RoleMemoryORM,
+        WorldState, Decision, Conflict, ConflictResolution, TickResult,
+        WorldStatus, RoleStatus, EventType
+    )
+except ImportError:
+    from models import (
+        WorldORM, RoleORM, EventORM, WorldSnapshotORM, RoleMemoryORM,
+        WorldState, Decision, Conflict, ConflictResolution, TickResult,
+        WorldStatus, RoleStatus, EventType
+    )
 
-
-class ClawConnector:
-    """
-    连接Claw服务的接口
-    实际实现会通过HTTP调用OpenClaw或其他LLM服务
-    """
-    
-    async def request_decision(
-        self,
-        role: RoleORM,
-        world_state: WorldState,
-        context: Dict[str, Any]
-    ) -> Decision:
-        """
-        向Claw请求角色决策
-        
-        实际实现：
-        1. 构建包含角色卡、记忆、世界状态的prompt
-        2. 调用OpenClaw API
-        3. 解析返回的决策
-        """
-        # TODO: 实现实际的Claw调用
-        # 这里先返回一个模拟决策用于测试
-        return Decision(
-            role_id=role.id,
-            tick=world_state.tick,
-            thought=f"{role.name}正在思考当前局势...",
-            action={
-                "type": "observe",
-                "target": None,
-                "details": "观察周围环境"
-            },
-            dialogue=None
-        )
-    
-    async def generate_summary(
-        self,
-        tick: int,
-        events: List[EventORM],
-        world_changes: Dict[str, Any]
-    ) -> str:
-        """生成tick摘要"""
-        # TODO: 调用Claw生成人类可读摘要
-        return f"第{tick}轮：世界继续运转"
-
-
-class ConflictArbiter:
-    """
-    冲突检测与仲裁器
-    检测角色决策之间的冲突，并裁决结果
-    """
-    
-    def detect_conflicts(self, decisions: List[Decision]) -> List[Conflict]:
-        """
-        检测决策之间的冲突
-        
-        冲突类型：
-        1. resource: 争夺同一资源
-        2. stealth_vs_detection: 秘密行动 vs 侦察
-        3. betrayal: 欺骗/背叛
-        4. confrontation: 直接对抗
-        """
-        conflicts = []
-        
-        for i, dec1 in enumerate(decisions):
-            for dec2 in decisions[i+1:]:
-                conflict = self._check_pair_conflict(dec1, dec2)
-                if conflict:
-                    conflicts.append(conflict)
-        
-        return conflicts
-    
-    def _check_pair_conflict(self, dec1: Decision, dec2: Decision) -> Optional[Conflict]:
-        """检查两个决策是否冲突"""
-        
-        # 检查是否争夺同一目标
-        if dec1.target and dec2.target and dec1.target == dec2.target:
-            if dec1.action.get("type") in ["attack", "seize", "claim"] and \
-               dec2.action.get("type") in ["defend", "protect", "claim"]:
-                return Conflict(
-                    type="resource",
-                    parties=[dec1.role_id, dec2.role_id],
-                    description=f"{dec1.role_id} 和 {dec2.role_id} 争夺同一目标",
-                    stakes=str(dec1.target),
-                    severity="serious"
-                )
-        
-        # 检查欺骗 vs 侦察
-        if dec1.action.get("type") == "stealth" and dec2.action.get("type") == "detect":
-            if dec1.target == dec2.role_id or dec2.target == dec1.role_id:
-                return Conflict(
-                    type="stealth_vs_detection",
-                    parties=[dec1.role_id, dec2.role_id],
-                    description="秘密行动可能被察觉",
-                    stakes="秘密暴露",
-                    severity="normal"
-                )
-        
-        return None
-    
-    async def resolve_conflicts(
-        self,
-        conflicts: List[Conflict],
-        db: Session
-    ) -> List[ConflictResolution]:
-        """
-        解决冲突
-        
-        简单实现：基于实力和随机因素
-        复杂实现：可以调用Claw模拟对抗过程
-        """
-        resolutions = []
-        
-        for conflict in conflicts:
-            resolution = await self._resolve_single_conflict(conflict, db)
-            resolutions.append(resolution)
-        
-        return resolutions
-    
-    async def _resolve_single_conflict(
-        self,
-        conflict: Conflict,
-        db: Session
-    ) -> ConflictResolution:
-        """解决单个冲突"""
-        
-        # 获取冲突双方的角色信息
-        roles = db.query(RoleORM).filter(RoleORM.id.in_(conflict.parties)).all()
-        
-        # 简化逻辑：比较influence + random
-        import random
-        
-        role_powers = {r.id: r.influence + random.randint(-20, 20) for r in roles}
-        
-        if len(role_powers) >= 2:
-            sorted_roles = sorted(role_powers.items(), key=lambda x: x[1], reverse=True)
-            winner_id = sorted_roles[0][0]
-            loser_id = sorted_roles[1][0] if len(sorted_roles) > 1 else None
-        else:
-            winner_id = list(role_powers.keys())[0] if role_powers else None
-            loser_id = None
-        
-        # 根据冲突类型决定结果
-        if conflict.type == "resource":
-            outcome = "victory" if winner_id else "compromise"
-        elif conflict.type == "stealth_vs_detection":
-            outcome = "detected" if winner_id == conflict.parties[1] else "undetected"
-        else:
-            outcome = "compromise"
-        
-        return ConflictResolution(
-            conflict_id=conflict.id,
-            outcome_type=outcome,
-            winner=winner_id,
-            loser=loser_id,
-            description=f"冲突解决：{outcome}",
-            world_changes=[
-                {"type": "influence_change", "target": winner_id, "delta": 10},
-                {"type": "influence_change", "target": loser_id, "delta": -10} if loser_id else None
-            ],
-            memory_updates=[
-                {"role_id": winner_id, "content": f"在冲突中战胜了对手"},
-                {"role_id": loser_id, "content": f"在冲突中失利"} if loser_id else None
-            ]
-        )
-
-
-class EventGenerator:
-    """
-    事件生成器
-    将决策和冲突结果转化为世界事件
-    """
-    
-    def generate_events(
-        self,
-        world_id: UUID,
-        tick: int,
-        decisions: List[Decision],
-        resolutions: List[ConflictResolution],
-        db: Session
-    ) -> List[EventORM]:
-        """生成事件"""
-        events = []
-        
-        # 为每个重要决策生成事件
-        for decision in decisions:
-            if decision.action.get("type") in ["attack", "negotiate", "discover", "move"]:
-                event = EventORM(
-                    world_id=world_id,
-                    tick=tick,
-                    type=self._map_action_to_event_type(decision.action["type"]),
-                    title=f"{decision.role_id}的{decision.action['type']}",
-                    description=decision.thought[:200],
-                    participants=[decision.role_id],
-                    outcome={"action": decision.action},
-                    is_canon=True
-                )
-                events.append(event)
-        
-        # 为冲突生成事件
-        for resolution in resolutions:
-            if resolution.outcome_type in ["victory", "destruction", "exposed"]:
-                event = EventORM(
-                    world_id=world_id,
-                    tick=tick,
-                    type=EventType.CONFLICT,
-                    title=f"冲突：{resolution.outcome_type}",
-                    description=resolution.description,
-                    participants=[resolution.winner, resolution.loser] if resolution.loser else [resolution.winner],
-                    outcome={"resolution": resolution.outcome_type},
-                    is_canon=True
-                )
-                events.append(event)
-        
-        return events
-    
-    def _map_action_to_event_type(self, action_type: str) -> EventType:
-        """映射行动类型到事件类型"""
-        mapping = {
-            "attack": EventType.CONFLICT,
-            "negotiate": EventType.NEGOTIATION,
-            "discover": EventType.DISCOVERY,
-            "move": EventType.MOVEMENT,
-            "speak": EventType.COMMUNICATION
-        }
-        return mapping.get(action_type, EventType.NATURAL)
+# 导入核心组件
+from .claw_connector import ClawConnector
+from .conflict_arbiter import ConflictArbiter
+from .event_generator import EventGenerator
 
 
 class WorldEngine:
     """
     世界引擎核心
-    负责推进世界状态，管理tick循环
+    负责推进世界状态，管理 tick 循环
     """
     
     def __init__(
         self,
         db_session: Session,
-        claw_connector: ClawConnector,
-        arbiter: ConflictArbiter,
-        event_generator: EventGenerator
+        claw_connector: Optional[ClawConnector] = None,
+        arbiter: Optional[ConflictArbiter] = None,
+        event_generator: Optional[EventGenerator] = None
     ):
         self.db = db_session
-        self.claw = claw_connector
-        self.arbiter = arbiter
-        self.event_gen = event_generator
+        self.claw = claw_connector or ClawConnector()
+        self.arbiter = arbiter or ConflictArbiter()
+        self.event_gen = event_generator or EventGenerator()
     
     async def tick(self, world_id: UUID) -> TickResult:
         """
-        推进一个tick
+        推进一个 tick
         
         流程：
         1. 加载世界当前状态
@@ -276,11 +61,15 @@ class WorldEngine:
         4. 解决冲突
         5. 生成事件
         6. 更新角色记忆
-        7. 保存世界快照
-        8. 更新世界tick
+        7. 应用世界变更
+        8. 保存世界快照
+        9. 更新世界 tick
         """
+        # 将 UUID 转为字符串以兼容 SQLite
+        world_id_str = str(world_id)
+        
         # 获取世界
-        world = self.db.query(WorldORM).filter(WorldORM.id == world_id).first()
+        world = self.db.query(WorldORM).filter(WorldORM.id == world_id_str).first()
         if not world:
             raise ValueError(f"World {world_id} not found")
         
@@ -289,14 +78,17 @@ class WorldEngine:
         
         current_tick = world.current_tick
         
-        # 1. 加载上一tick状态
+        # 1. 加载上一 tick 状态
         previous_state = await self._load_world_state(world_id, current_tick)
         
         # 2. 收集活跃角色
         active_roles = self.db.query(RoleORM).filter(
-            RoleORM.world_id == world_id,
+            RoleORM.world_id == world_id_str,
             RoleORM.status.in_([RoleStatus.ACTIVE, RoleStatus.BUSY])
         ).all()
+        
+        # 缓存角色信息（用于事件生成）
+        roles_info = {r.id: r for r in active_roles}
         
         # 3. 并行请求决策
         decisions = await self._collect_decisions(active_roles, previous_state)
@@ -312,7 +104,7 @@ class WorldEngine:
         
         # 7. 生成事件
         events = self.event_gen.generate_events(
-            world_id, current_tick + 1, decisions, resolutions, self.db
+            world_id_str, current_tick + 1, decisions, resolutions, roles_info
         )
         
         # 保存事件到数据库
@@ -323,21 +115,38 @@ class WorldEngine:
         await self._update_role_memories(resolutions, current_tick + 1)
         
         # 9. 保存新状态快照
-        new_state = await self._build_snapshot(world_id, current_tick + 1)
+        snapshot_data = await self._build_snapshot_dict(world_id_str, current_tick + 1)
         snapshot = WorldSnapshotORM(
-            world_id=world_id,
+            world_id=world_id_str,
             tick=current_tick + 1,
-            snapshot=new_state.dict(),
+            snapshot=snapshot_data,
             summary=await self.claw.generate_summary(current_tick + 1, events, world_changes)
         )
         self.db.add(snapshot)
         
-        # 10. 更新世界tick
+        # 10. 更新世界 tick
         world.current_tick = current_tick + 1
         world.updated_at = datetime.utcnow()
         
         # 提交事务
         self.db.commit()
+        
+        # 将EventORM对象转换为字典，用于TickResult
+        events_dicts = [
+            {
+                "id": e.id,
+                "world_id": e.world_id,
+                "tick": e.tick,
+                "type": e.type,
+                "title": e.title,
+                "description": e.description,
+                "participants": e.participants,
+                "outcome": e.outcome,
+                "is_canon": e.is_canon,
+                "created_at": e.created_at.isoformat() if e.created_at else None
+            }
+            for e in events
+        ]
         
         return TickResult(
             tick=current_tick + 1,
@@ -345,13 +154,13 @@ class WorldEngine:
             decisions=decisions,
             conflicts=conflicts,
             resolutions=resolutions,
-            events=events,
+            events=events_dicts,
             world_changes=world_changes,
             summary=snapshot.summary
         )
     
     async def run_ticks(self, world_id: UUID, count: int) -> List[TickResult]:
-        """连续推进多个tick"""
+        """连续推进多个 tick"""
         results = []
         
         for i in range(count):
@@ -361,24 +170,34 @@ class WorldEngine:
             # 检查是否有需要人类注意的事件
             notable_events = self._check_notable_events(result)
             if notable_events:
-                # 暂停，通知人类
-                print(f"Notable events detected at tick {result.tick}: {notable_events}")
+                print(f"[注意] Tick {result.tick} 发生重要事件: {notable_events}")
                 break
             
-            # 小延迟，避免API限流
+            # 小延迟，避免 API 限流
             await asyncio.sleep(0.1)
         
         return results
     
     async def _load_world_state(self, world_id: UUID, tick: int) -> WorldState:
-        """加载指定tick的世界状态"""
+        """加载指定 tick 的世界状态"""
+        world_id_str = str(world_id)
         snapshot = self.db.query(WorldSnapshotORM).filter(
-            WorldSnapshotORM.world_id == world_id,
+            WorldSnapshotORM.world_id == world_id_str,
             WorldSnapshotORM.tick == tick
         ).first()
         
         if snapshot:
-            return WorldState.parse_obj(snapshot.snapshot)
+            # 将字符串 ID 的数据转为 Pydantic 模型
+            data = snapshot.snapshot
+            return WorldState(
+                tick=data.get("tick", tick),
+                world_id=world_id,
+                roles=data.get("roles", {}),
+                geography=data.get("geography", {}),
+                factions=data.get("factions", {}),
+                global_events=data.get("global_events", []),
+                secrets_status=data.get("secrets_status", {})
+            )
         
         # 如果没有快照，构建初始状态
         return WorldState(
@@ -416,23 +235,8 @@ class WorldEngine:
             RoleMemoryORM.role_id == role.id
         ).order_by(RoleMemoryORM.tick.desc()).limit(10).all()
         
-        # 获取关系
-        from models import RelationshipORM
-        relationships = self.db.query(RelationshipORM).filter(
-            (RelationshipORM.from_role_id == role.id) |
-            (RelationshipORM.to_role_id == role.id)
-        ).all()
-        
         return {
             "memories": [m.content for m in recent_memories],
-            "relationships": [
-                {
-                    "with": r.to_role_id if r.from_role_id == role.id else r.from_role_id,
-                    "type": r.type,
-                    "trust": r.trust_level
-                }
-                for r in relationships
-            ],
             "health": role.health,
             "influence": role.influence
         }
@@ -444,20 +248,45 @@ class WorldEngine:
         """应用冲突解决结果到世界状态"""
         changes = {
             "influence_changes": [],
+            "health_changes": [],
             "status_changes": [],
             "location_changes": []
         }
         
         for resolution in resolutions:
             for change in resolution.world_changes:
-                if change and change.get("type") == "influence_change":
+                if not change:
+                    continue
+                    
+                change_type = change.get("type")
+                target_id = change.get("target")
+                
+                if change_type == "influence_change":
                     changes["influence_changes"].append(change)
-                    # 实际更新数据库
                     role = self.db.query(RoleORM).filter(
-                        RoleORM.id == change["target"]
+                        RoleORM.id == target_id
                     ).first()
                     if role:
-                        role.influence = max(0, role.influence + change["delta"])
+                        role.influence = max(0, min(100, role.influence + change.get("delta", 0)))
+                
+                elif change_type == "health_change":
+                    changes["health_changes"].append(change)
+                    role = self.db.query(RoleORM).filter(
+                        RoleORM.id == target_id
+                    ).first()
+                    if role:
+                        role.health = max(0, min(100, role.health + change.get("delta", 0)))
+                        # 检查是否死亡
+                        if role.health <= 0:
+                            role.status = RoleStatus.DECEASED
+                            changes["status_changes"].append({
+                                "target": target_id,
+                                "new_status": "DECEASED"
+                            })
+                
+                elif change_type == "relationship_change":
+                    # TODO: 实现关系变更
+                    pass
         
         return changes
     
@@ -469,24 +298,28 @@ class WorldEngine:
         """更新角色记忆"""
         for resolution in resolutions:
             for mem_update in resolution.memory_updates:
-                if mem_update:
-                    memory = RoleMemoryORM(
-                        role_id=mem_update["role_id"],
-                        tick=tick,
-                        type="experience",
-                        content=mem_update["content"],
-                        importance=7
-                    )
-                    self.db.add(memory)
+                if not mem_update:
+                    continue
+                
+                memory = RoleMemoryORM(
+                    id=str(uuid4()),
+                    role_id=mem_update["role_id"],
+                    tick=tick,
+                    type="experience",
+                    content=mem_update["content"],
+                    importance=mem_update.get("importance", 5),
+                    created_at=datetime.utcnow()
+                )
+                self.db.add(memory)
     
-    async def _build_snapshot(self, world_id: UUID, tick: int) -> WorldState:
-        """构建世界状态快照"""
+    async def _build_snapshot_dict(self, world_id: str, tick: int) -> dict:
+        """构建世界状态快照字典（可 JSON 序列化）"""
         roles = self.db.query(RoleORM).filter(RoleORM.world_id == world_id).all()
         
-        return WorldState(
-            tick=tick,
-            world_id=world_id,
-            roles={
+        return {
+            "tick": tick,
+            "world_id": world_id,
+            "roles": {
                 r.id: {
                     "name": r.name,
                     "status": r.status,
@@ -496,27 +329,36 @@ class WorldEngine:
                 }
                 for r in roles
             },
-            geography={},
-            factions={},
-            global_events=[],
-            secrets_status={}
-        )
+            "geography": {},
+            "factions": {},
+            "global_events": [],
+            "secrets_status": {}
+        }
     
     def _check_notable_events(self, result: TickResult) -> List[str]:
         """检查是否有需要人类注意的事件"""
         notable = []
         
         for event in result.events:
-            if event.type == EventType.CONFLICT and event.outcome.get("severity") == "critical":
-                notable.append(f"Critical conflict: {event.title}")
+            event_type = event.type if hasattr(event, 'type') else str(event.type)
             
-            if event.type == EventType.DIVINE:
-                notable.append(f"Divine intervention: {event.title}")
+            if "CONFLICT" in event_type:
+                outcome = event.outcome or {}
+                if outcome.get("severity") == "critical":
+                    notable.append(f"严重冲突: {event.title}")
+            
+            if "DIVINE" in event_type:
+                notable.append(f"神迹事件: {event.title}")
         
         # 检查角色死亡
         for resolution in result.resolutions:
             if resolution.outcome_type == "destruction":
-                notable.append(f"Character destroyed: {resolution.loser}")
+                notable.append(f"角色死亡: {resolution.loser}")
+        
+        # 检查影响力剧烈变化
+        for change in result.world_changes.get("influence_changes", []):
+            if abs(change.get("delta", 0)) > 20:
+                notable.append(f"影响力剧变: {change.get('target')}")
         
         return notable
 
@@ -547,7 +389,7 @@ async def create_world(
     
     # 创建初始快照
     snapshot = WorldSnapshotORM(
-        world_id=world.id,
+        world_id=str(world.id),
         tick=0,
         snapshot={
             "tick": 0,
@@ -558,7 +400,8 @@ async def create_world(
             "global_events": [],
             "secrets_status": {}
         },
-        summary="世界创世"
+        summary="世界创世",
+        created_at=datetime.utcnow()
     )
     db.add(snapshot)
     db.commit()
@@ -575,11 +418,11 @@ async def create_role(
 ) -> RoleORM:
     """创建新角色"""
     role = RoleORM(
-        world_id=world_id,
+        world_id=str(world_id),
         name=name,
         card=card,
         status=RoleStatus.ACTIVE,
-        location_id=initial_location,
+        location_id=str(initial_location) if initial_location else None,
         health=100,
         influence=50
     )
@@ -589,11 +432,13 @@ async def create_role(
     
     # 创建初始记忆
     memory = RoleMemoryORM(
+        id=str(uuid4()),
         role_id=role.id,
         tick=0,
         type="experience",
-        content=f"{name}诞生于世界",
-        importance=10
+        content=f"{name} 诞生于世界",
+        importance=10,
+        created_at=datetime.utcnow()
     )
     db.add(memory)
     db.commit()

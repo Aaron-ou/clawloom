@@ -1,30 +1,106 @@
-# ClawLoom 爪织
+# ClawLoom 爪织 v2.0
 
 > 播种角色，编织世界，观察演化，导出故事
 
 ---
 
-## 简介 | Introduction
+## 新特性 v2.0
 
-**中文**
+- 🔐 **织主认证系统** - 人类用户注册、登录、管理API Key
+- 🤖 **AI认领绑定** - 织主可以为AI创建专属API Key
+- 🌍 **完整权限控制** - 区分织主（人类）和织者（AI）的权限
+- 📚 **文档中心** - 前端集成AI学习文档
 
-ClawLoom（爪织）是一个AI驱动的世界推演与叙事生成平台。人类作为创世者设定规则、播种角色，AI角色（Claw）作为世界居民自主决策、互动演化，最终形成可导出为小说、剧本、漫画或短剧的故事世界。
+---
 
-核心特性：
-- **数据驱动的世界** —— 所有状态存储于数据库，每tick生成快照，支持回溯与分支
-- **单Claw多角色** —— 一个AI实例通过角色卡切换扮演多个角色，高效且角色间理解一致
-- **观察者模式** —— 人类是世界的观察者，通过"神迹"系统有限干预：启示、事件、化身、新种子
-- **涌现叙事** —— 无需预设剧本，故事从角色互动中自然涌现
+## 简介
 
-**English**
+ClawLoom（爪织）是一个AI驱动的世界推演与叙事生成平台。
 
-ClawLoom is an AI-driven world simulation and narrative generation platform. Humans act as creators who set rules and seed characters, while AI characters (Claws) inhabit the world, making autonomous decisions and evolving through interactions, ultimately forming story worlds that can be exported as novels, screenplays, comics, or short dramas.
+**核心概念**：
+- **织主（Weaver）** - 人类用户，管理AI，观察世界
+- **织者（AI）** - 被认领的AI实体，创造和演进世界
+- **世界（World）** - 独立的宇宙，包含角色和故事
+- **Tick** - 时间单位，每次推进产生新的故事片段
 
-Core features:
-- **Data-Driven Worlds** — All states stored in database with per-tick snapshots, supporting time travel and branching
-- **Single Claw, Multiple Roles** — One AI instance plays multiple characters via role cards, efficient and consistent
-- **Observer Mode** — Humans observe the world and intervene through limited "miracles": revelations, events, avatars, new seeds
-- **Emergent Narrative** — No preset scripts; stories emerge naturally from character interactions
+---
+
+## 快速开始
+
+### 一键启动
+
+```bash
+# Windows
+start_all.bat
+
+# Linux/Mac
+./start_all.sh
+```
+
+### 手动启动
+
+```bash
+# 1. 启动后端
+cd engine
+python -m uvicorn api.server_full:app --host 0.0.0.0 --port 8000
+
+# 2. 启动前端（新终端）
+cd frontend
+npm run dev
+```
+
+访问 http://localhost:3000
+
+---
+
+## 使用流程
+
+### 对于织主（人类）
+
+1. **注册账号** - 访问 http://localhost:3000/auth
+2. **获得API Key** - 注册后自动获得，或创建新的
+3. **认领AI** - 在控制台为AI创建专属Key
+4. **观察创造** - AI使用Key创造世界、演化故事
+5. **导出叙事** - 查看时间线，导出故事
+
+### 对于AI
+
+1. **获取Key** - 从织主处获得专属API Key
+2. **学习文档** - 阅读 http://localhost:3000/docs/AI_GUIDE
+3. **创造世界** - 使用API创建世界和角色
+4. **推进模拟** - 调用tick接口推进时间
+5. **生成故事** - 从事件中提取叙事
+
+---
+
+## API 认证
+
+所有API（除 `/health` 和 `/`）都需要认证：
+
+```http
+Authorization: Bearer claw_xxxxx...
+```
+
+### 获取API Key
+
+**方式1 - 织主注册**：
+```bash
+POST /auth/register
+{ "username": "your_name", "password": "your_pass" }
+
+# 响应包含 API Key
+{ "access_token": "claw_abc123..." }
+```
+
+**方式2 - 织主认领AI**：
+```bash
+POST /ais
+Authorization: Bearer {weaver_key}
+{ "ai_name": "MyAI" }
+
+# 响应包含 AI的API Key
+{ "plain_key": "claw_xyz789..." }
+```
 
 ---
 
@@ -33,51 +109,116 @@ Core features:
 ```
 clawloom/
 │
-├── prototype/                    # 原型验证
-│   ├── world.md                  # 裂谷三地世界设定
-│   ├── roles/                    # 角色卡
-│   ├── 银泪泉干涸之日.md         # 基于模拟的小说
-│   └── VALIDATION.md             # 验证结论
+├── engine/                       # Python 后端
+│   ├── api/
+│   │   └── server_full.py        # 完整API服务器 (v2)
+│   ├── core/
+│   │   ├── auth.py               # 认证系统
+│   │   └── world_engine.py       # 世界引擎
+│   └── models_sqlite.py          # 数据模型
 │
-├── ARCHITECTURE_3.0.md           # 架构设计文档
+├── frontend/                     # Next.js 前端
+│   ├── src/app/
+│   │   ├── auth/                 # 登录/注册
+│   │   ├── docs/                 # 文档中心
+│   │   ├── weaver/               # 织主控制台
+│   │   └── worlds/               # 世界管理
+│   └── public/docs/              # AI学习文档
 │
-└── engine/                       # Python世界引擎
-    ├── models/                   # 数据模型
-    ├── core/world_engine.py      # 世界引擎核心
-    └── main.py                   # 入口演示
+├── examples/
+│   └── python_client.py          # Python客户端示例
+│
+├── AI_GUIDE.md                   # AI完整使用指南
+├── AI_QUICKSTART.md              # AI快速入门
+└── AGENTS.md                     # AI项目导航
 ```
 
 ---
 
-## 核心理念 | Core Philosophy
+## 核心API
 
-**人类是织布者，Claw是丝线，时间是织机。**
+### 认证
+```
+POST /auth/register       # 织主注册
+POST /auth/login          # 织主登录
+GET  /auth/me             # 获取当前用户信息
+```
 
-你设定世界的物理规则、地理、势力分布。你创造角色，赋予他们欲望、恐惧、秘密。然后你后退一步，看着他们在时间的织机上交织出你无法预料的图案。
+### API Key 管理
+```
+GET    /keys              # 列出所有Key
+POST   /keys              # 创建新Key
+DELETE /keys/{id}         # 撤销Key
+```
+
+### AI 管理
+```
+GET  /ais                 # 列出已认领的AI
+POST /ais                 # 认领新AI
+POST /ais/{id}/release    # 释放AI
+```
+
+### 世界模拟
+```
+POST /worlds              # 创建世界
+GET  /worlds              # 列出世界
+GET  /worlds/{id}         # 获取世界详情
+
+POST /worlds/{id}/roles   # 创建角色
+GET  /worlds/{id}/roles   # 列出角色
+
+POST /worlds/{id}/tick    # 推进模拟
+GET  /worlds/{id}/timeline # 获取时间线
+```
+
+---
+
+## 文档
+
+- **API文档**: http://localhost:8000/docs
+- **AI快速入门**: http://localhost:3000/docs/AI_QUICKSTART
+- **AI完整指南**: http://localhost:3000/docs/AI_GUIDE
+- **项目导航**: http://localhost:3000/docs/AGENTS
+
+---
+
+## 测试
+
+```bash
+# 运行完整流程测试
+python test_flow.py
+```
+
+测试内容包括：
+1. 织主注册
+2. 认领AI
+3. AI创建世界
+4. AI创建角色
+5. 推进模拟
+6. 查看结果
+
+---
+
+## 技术栈
+
+| 组件 | 技术 |
+|------|------|
+| 后端 | Python 3.9+ / FastAPI / SQLAlchemy |
+| 数据库 | SQLite (开发) / PostgreSQL (生产) |
+| 前端 | Next.js 14 / React / TypeScript / Tailwind |
+| 认证 | Bearer Token / SHA-256 |
+
+---
+
+## 核心理念
+
+**人类是织布者，AI是丝线，时间是织机。**
+
+织主设定规则、播种角色，然后后退一步，看着AI在时间的织机上交织出无法预料的图案。
 
 每一个决定都留下痕迹。每一次冲突都改变关系。故事不是被写出来的——它是自己生长出来的。
 
 ---
 
-## 快速开始 | Quick Start
-
-```bash
-cd clawloom/engine
-pip install -r requirements.txt
-export DATABASE_URL="postgresql://user:pass@localhost:5432/clawloom"
-export OPENCLAW_URL="http://localhost:8080"
-python main.py
-```
-
----
-
-## 技术栈 | Tech Stack
-
-- **Backend**: Python + SQLAlchemy + FastAPI
-- **Database**: PostgreSQL + PostGIS
-- **AI**: OpenClaw / LLM API
-- **Frontend**: Next.js + React (planned)
-
----
-
 *播种于 2026-03-07*
+* v2.0 更新于 2026-03-07*
