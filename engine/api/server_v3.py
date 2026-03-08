@@ -1066,6 +1066,231 @@ def clear_hex_map(
     return {"message": f"Deleted {count} tiles"}
 
 
+# ============ AI Map Generation API ============
+
+class AIMapGenerateRequest(BaseModel):
+    """AI生成地图请求"""
+    width: int = Field(15, ge=5, le=101, description="地图宽度")
+    height: int = Field(15, ge=5, le=101, description="地图高度")
+    layout: str = Field("pointy", description="布局类型: pointy或flat")
+    seed: Optional[int] = Field(None, description="随机种子")
+    terrain_distribution: Optional[Dict[str, float]] = Field(None, description="地形分布比例")
+    height_range: Optional[Dict[str, int]] = Field(None, description="高度范围 {min, max}")
+    obstacles: Optional[List[Dict[str, int]]] = Field(None, description="障碍物位置列表 [{q, r}]")
+    resources: Optional[List[Dict[str, any]]] = Field(None, description="资源位置列表 [{q, r, type}]")
+
+@app.post("/worlds/{world_id}/ai/generate-map")
+def ai_generate_map(
+    world_id: str,
+    data: AIMapGenerateRequest,
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    AI生成地图API - 允许AI通过API生成自定义地图
+    
+    示例请求:
+    {
+        "width": 21,
+        "height": 21,
+        "layout": "pointy",
+        "seed": 12345,
+        "terrain_distribution": {
+            "grass": 0.3,
+            "water": 0.2,
+            "mountain": 0.2,
+            "forest": 0.15,
+            "desert": 0.1,
+            "snow": 0.05
+        },
+        "height_range": {"min": 0, "max": 5},
+        "obstacles": [{"q": 0, "r": 0}, {"q": 1, "r": 1}],
+        "resources": [{"q": 5, "r": 5, "type": "gold"}]
+    }
+    """
+    # 验证AI身份
+    ai_data = get_current_ai_user_optional(authorization, db)
+    if not ai_data:
+        raise HTTPException(status_code=401, detail="AI authentication required")
+    
+    # 检查世界是否存在
+    world = db.query(WorldORM).filter(WorldORM.id == world_id).first()
+    if not world:
+        raise HTTPException(status_code=404, detail="World not found")
+    
+    # 设置随机种子
+    if data.seed:
+        random.seed(data.seed)
+    else:
+        random.seed()
+    
+    # 地形分布默认比例
+    default_distribution = {
+        "grass": 0.25,
+        "water": 0.20,
+        "mountain": 0.15,
+        "forest": 0.15,
+        "desert": 0.15,
+        "snow": 0.10,
+    }
+    distribution = data.terrain_distribution or default_distribution
+    
+    # 高度范围
+    height_min = data.height_range.get("min", 0) if data.height_range else 0
+    height_max = data.height_range.get("max", 5) if data.height_range else 5
+    
+    # 清除现有地图
+    db.query(HexTileORM).filter(HexTileORM.world_id == world_id).delete()
+    
+    # 生成地图数据
+    tiles = []
+    half_width = data.width // 2
+    half_height = data.height // 2
+    
+    # 障碍物和资源位置映射
+    obstacle_map = {(o["q"], o["r"]): True for o in (data.obstacles or [])}
+    resource_map = {(r["q"], r["r"]): r for r in (data.resources or [])}
+    
+    for q in range(-half_width, half_width + 1):
+        for r in range(-half_height, half_height + 1):
+            # 根据分布选择地形
+            rand = random.random()
+            cumulative = 0
+            terrain = "grass"  # 默认
+            
+            for t_type, prob in distribution.items():
+                cumulative += prob
+                if rand <= cumulative:
+                    terrain = t_type
+                    break
+            
+            # 创建瓦片
+            tile = HexTileORM(
+                id=str(uuid4()),
+                world_id=world_id,
+                q=q,
+                r=r,
+                terrain=terrain.upper(),
+                elevation=random.randint(height_min, height_max),
+                moisture=random.randint(20, 80),
+                temperature=random.randint(-10, 35),
+                features=[],
+                properties={
+                    "is_obstacle": obstacle_map.get((q, r), False),
+                    "resource": resource_map.get((q, r), {}).get("type")
+                }
+            )
+            db.add(tile)
+            tiles.append({
+                "id": tile.id,
+                "q": q,
+                "r": r,
+                "terrain": terrain,
+                "elevation": tile.elevation,
+                "is_obstacle": obstacle_map.get((q, r), False),
+                "resource": resource_map.get((q, r), {}).get("type")
+            })
+    
+    db.commit()
+    
+    return {
+        "message": "Map generated successfully",
+        "world_id": world_id,
+        "width": data.width,
+        "height": data.height,
+        "layout": data.layout,
+        "tile_count": len(tiles),
+        "tiles": tiles[:10],  # 返回前10个作为预览
+        "seed": data.seed or int(random.random() * 100000)
+    }
+
+@app.post("/worlds/{world_id}/ai/batch-update-tiles")
+def ai_batch_update_tiles(
+    world_id: str,
+    tiles: List[Dict[str, any]],
+    authorization: str = Header(None),
+    db: Session = Depends(get_db)
+):
+    """
+    AI批量更新瓦片 - 允许AI批量修改地图瓦片
+    
+    示例请求:
+    [
+        {"q": 0, "r": 0, "terrain": "MOUNTAIN", "elevation": 8},
+        {"q": 1, "r": 0, "terrain": "WATER", "is_obstacle": true}
+    ]
+    """
+    # 验证AI身份
+    ai_data = get_current_ai_user_optional(authorization, db)
+    if not ai_data:
+        raise HTTPException(status_code=401, detail="AI authentication required")
+    
+    # 检查世界是否存在
+    world = db.query(WorldORM).filter(WorldORM.id == world_id).first()
+    if not world:
+        raise HTTPException(status_code=404, detail="World not found")
+    
+    updated_count = 0
+    created_count = 0
+    
+    for tile_data in tiles:
+        q = tile_data.get("q")
+        r = tile_data.get("r")
+        if q is None or r is None:
+            continue
+        
+        # 查找现有瓦片
+        existing = db.query(HexTileORM).filter(
+            HexTileORM.world_id == world_id,
+            HexTileORM.q == q,
+            HexTileORM.r == r
+        ).first()
+        
+        if existing:
+            # 更新现有瓦片
+            if "terrain" in tile_data:
+                existing.terrain = tile_data["terrain"]
+            if "elevation" in tile_data:
+                existing.elevation = tile_data["elevation"]
+            if "moisture" in tile_data:
+                existing.moisture = tile_data["moisture"]
+            if "temperature" in tile_data:
+                existing.temperature = tile_data["temperature"]
+            if "features" in tile_data:
+                existing.features = tile_data["features"]
+            if "resource" in tile_data:
+                existing.resource = tile_data["resource"]
+            if "properties" in tile_data:
+                existing.properties = {**existing.properties, **tile_data["properties"]}
+            existing.updated_at = datetime.utcnow()
+            updated_count += 1
+        else:
+            # 创建新瓦片
+            new_tile = HexTileORM(
+                id=str(uuid4()),
+                world_id=world_id,
+                q=q,
+                r=r,
+                terrain=tile_data.get("terrain", "PLAINS"),
+                elevation=tile_data.get("elevation", 0),
+                moisture=tile_data.get("moisture", 50),
+                temperature=tile_data.get("temperature", 20),
+                features=tile_data.get("features", []),
+                resource=tile_data.get("resource"),
+                properties=tile_data.get("properties", {})
+            )
+            db.add(new_tile)
+            created_count += 1
+    
+    db.commit()
+    
+    return {
+        "message": "Tiles updated successfully",
+        "updated": updated_count,
+        "created": created_count
+    }
+
+
 # ============ Run Server ============
 
 if __name__ == "__main__":

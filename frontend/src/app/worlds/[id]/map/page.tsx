@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { WorldAPI } from "@/lib/api";
-import { HexMap, HexTile } from "@/components/hexmap";
+import { HexMap } from "@/components/hexmap";
 
 // 地点类型配置
 const LOCATION_ICONS: Record<string, string> = {
@@ -49,6 +49,23 @@ interface Path {
   color?: string;
   style: string;
   is_hidden: boolean;
+}
+
+// 本地HexTile类型
+interface HexTile {
+  id: string;
+  q: number;
+  r: number;
+  terrain: string;
+  location_id?: string;
+  location_name?: string;
+  elevation?: number;
+  moisture?: number;
+  temperature?: number;
+  height?: number;
+  resource?: string;
+  features?: string[];
+  properties?: Record<string, any>;
 }
 
 interface Region {
@@ -325,7 +342,7 @@ export default function WorldMapPage() {
                 </div>
               )}
 
-              {selectedTile.features.length > 0 && (
+              {selectedTile.features && selectedTile.features.length > 0 && (
                 <div className="p-3 bg-purple-50 rounded">
                   <span className="text-sm text-gray-600">特征: </span>
                   <span className="font-medium text-purple-700">
