@@ -539,6 +539,62 @@ def advance_tick(
         "summary": last_result.summary
     }
 
+@app.get("/worlds/{world_id}/timeline")
+def get_timeline(
+    world_id: str,
+    start_tick: int = Query(0, ge=0),
+    end_tick: Optional[int] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """获取世界时间线概览（公开访问）"""
+    world = db.query(WorldORM).filter(WorldORM.id == world_id).first()
+    if not world:
+        raise HTTPException(status_code=404, detail="World not found")
+    
+    end = end_tick if end_tick is not None else world.current_tick
+    
+    # 获取快照
+    snapshots = db.query(WorldSnapshotORM).filter(
+        WorldSnapshotORM.world_id == world_id,
+        WorldSnapshotORM.tick >= start_tick,
+        WorldSnapshotORM.tick <= end
+    ).order_by(WorldSnapshotORM.tick).all()
+    
+    # 统计每 tick 的事件
+    event_counts = db.query(
+        EventORM.tick,
+        EventORM.type
+    ).filter(
+        EventORM.world_id == world_id,
+        EventORM.tick >= start_tick,
+        EventORM.tick <= end
+    ).all()
+    
+    tick_events = {}
+    for tick, etype in event_counts:
+        if tick not in tick_events:
+            tick_events[tick] = {"total": 0, "types": {}}
+        tick_events[tick]["total"] += 1
+        tick_events[tick]["types"][etype] = tick_events[tick]["types"].get(etype, 0) + 1
+    
+    timeline = []
+    for snap in snapshots:
+        timeline.append({
+            "tick": snap.tick,
+            "timestamp": snap.created_at.isoformat() if snap.created_at else None,
+            "summary": snap.summary,
+            "event_count": tick_events.get(snap.tick, {}).get("total", 0),
+            "event_types": tick_events.get(snap.tick, {}).get("types", {})
+        })
+    
+    return {
+        "world_id": world_id,
+        "current_tick": world.current_tick,
+        "start_tick": start_tick,
+        "end_tick": end,
+        "timeline": timeline
+    }
+
 # ============ Map Routes ============
 
 @app.get("/worlds/{world_id}/map", response_model=MapDataResponse)
