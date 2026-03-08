@@ -24,12 +24,14 @@ export interface HexTile {
   isWaypoint?: boolean;
   location_id?: string; // 兼容旧版本
   location_name?: string; // 兼容旧版本
+  location_type?: string; // 地点类型: CITY, TOWN, VILLAGE, etc.
   x?: number; // 兼容旧版本
   y?: number; // 兼容旧版本
   elevation?: number; // 兼容旧版本
   moisture?: number; // 兼容旧版本
   temperature?: number; // 兼容旧版本
   features?: string[]; // 兼容旧版本
+  properties?: Record<string, any>; // 额外属性
   metadata?: Record<string, any>;
 }
 
@@ -78,6 +80,36 @@ const TERRAIN_NAMES: Record<TerrainType, string> = {
   snow: "雪地",
   forest: "森林",
   none: "空地",
+};
+
+// 地点类型到图标的映射
+const LOCATION_TYPE_ICONS: Record<string, string> = {
+  CITY: "🏰",
+  TOWN: "🏘️",
+  VILLAGE: "🛖",
+  CASTLE: "🏔️",
+  DUNGEON: "🕳️",
+  TEMPLE: "⛩️",
+  RUINS: "🏛️",
+  CAMP: "⛺",
+  PORT: "⚓",
+  FORT: "🗼",
+  TOWER: "🗼",
+  MINE: "⛏️",
+  OUTPOST: "🚩",
+  OTHER: "📍",
+};
+
+// 资源类型到图标的映射
+const RESOURCE_ICONS: Record<string, string> = {
+  gold: "💰",
+  iron: "⚙️",
+  wood: "🪵",
+  food: "🌾",
+  gem: "💎",
+  oil: "🛢️",
+  coal: "⚫",
+  fish: "🐟",
 };
 
 const DEFAULT_HEX_SIZE = 30;
@@ -432,13 +464,87 @@ export const HexMapCanvas: React.FC<HexMapCanvasProps> = ({
       ctx.stroke();
     }
     
-    // 图标
-    if (tile?.icon) {
-      ctx.font = `${hexSize * 0.6}px Arial`;
+    // 图标渲染
+    const getIconToRender = (): { icon: string; fontSize: number; yOffset: number } | null => {
+      // 优先使用显式设置的 icon
+      if (tile?.icon) {
+        return { icon: tile.icon, fontSize: 0.6, yOffset: 0 };
+      }
+      // 其次根据地点类型显示图标
+      if (tile?.location_type && LOCATION_TYPE_ICONS[tile.location_type]) {
+        return { 
+          icon: LOCATION_TYPE_ICONS[tile.location_type], 
+          fontSize: 0.55, 
+          yOffset: -0.1 
+        };
+      }
+      // 根据资源显示图标
+      if (tile?.resource && RESOURCE_ICONS[tile.resource]) {
+        return { 
+          icon: RESOURCE_ICONS[tile.resource], 
+          fontSize: 0.45, 
+          yOffset: 0.15 
+        };
+      }
+      return null;
+    };
+
+    const iconData = getIconToRender();
+    if (iconData) {
+      const iconSize = hexSize * iconData.fontSize;
+      const iconY = y + hexSize * iconData.yOffset;
+      
+      // 绘制圆形背景（使图标更清晰）
+      ctx.beginPath();
+      ctx.arc(x, iconY, iconSize * 0.7, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0,0,0,0.4)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.3)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      
+      // 绘制图标
+      ctx.font = `${iconSize}px Arial`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
+      
+      // 文字阴影效果
+      ctx.shadowColor = "rgba(0,0,0,0.8)";
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetX = 1;
+      ctx.shadowOffsetY = 1;
+      
       ctx.fillStyle = "white";
-      ctx.fillText(tile.icon, x, y);
+      ctx.fillText(iconData.icon, x, iconY);
+      
+      // 重置阴影
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+    }
+    
+    // 地点名称标签（如果瓦片较大且缩放足够）
+    if (tile?.location_name && hexSize * camera.zoom > 25) {
+      const nameY = y + hexSize * 0.5;
+      
+      // 文字背景
+      ctx.font = `bold ${hexSize * 0.22}px Arial`;
+      const textMetrics = ctx.measureText(tile.location_name);
+      const padding = 4;
+      ctx.fillStyle = "rgba(0,0,0,0.6)";
+      ctx.fillRect(
+        x - textMetrics.width / 2 - padding,
+        nameY - hexSize * 0.15,
+        textMetrics.width + padding * 2,
+        hexSize * 0.3
+      );
+      
+      // 文字
+      ctx.fillStyle = "white";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(tile.location_name, x, nameY);
     }
     
     // 坐标标签

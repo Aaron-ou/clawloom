@@ -148,28 +148,59 @@ export default function WorldMapPage() {
       
       // 尝试加载六边形地图
       try {
+        // 先加载地点信息，用于获取地点类型
+        const mapResponse = await fetch(`http://localhost:8000/worlds/${worldId}/map`);
+        let locationsData: Location[] = [];
+        if (mapResponse.ok) {
+          const mapDataJson = await mapResponse.json();
+          locationsData = mapDataJson.locations || [];
+          setLocations(locationsData);
+          setPaths(mapDataJson.paths || []);
+        }
+        
+        // 创建地点ID到地点类型和图标的映射
+        const locationTypeMap = new Map<string, { type: string; icon: string }>();
+        locationsData.forEach((loc) => {
+          locationTypeMap.set(loc.id, {
+            type: loc.location_type,
+            icon: LOCATION_ICONS[loc.location_type] || "📍",
+          });
+        });
+        
         const hexResponse = await fetch(`http://localhost:8000/worlds/${worldId}/hexmap`);
         if (hexResponse.ok) {
           const hexData = await hexResponse.json();
           
-          // 转换服务器数据
-          const tiles: HexTile[] = hexData.tiles.map((t: any) => ({
-            id: t.id,
-            q: t.q,
-            r: t.r,
-            terrain: mapServerTerrainToLocal(t.terrain),
-            height: t.elevation || 0,
-            elevation: t.elevation,
-            moisture: t.moisture,
-            temperature: t.temperature,
-            resource: t.resource,
-            features: t.features,
-            location_id: t.location_id,
-            location_name: t.location_name,
-            icon: t.location_name ? LOCATION_ICONS[t.location_type] : undefined,
-            label: t.location_name,
-            properties: t.properties,
-          }));
+          // 转换服务器数据，添加地点类型和图标
+          const tiles: HexTile[] = hexData.tiles.map((t: any) => {
+            // 如果瓦片有关联的地点，获取地点类型和图标
+            let locationType = undefined;
+            let icon = undefined;
+            if (t.location_id && locationTypeMap.has(t.location_id)) {
+              const locData = locationTypeMap.get(t.location_id)!;
+              locationType = locData.type;
+              icon = locData.icon;
+            }
+            
+            return {
+              id: t.id,
+              q: t.q,
+              r: t.r,
+              terrain: mapServerTerrainToLocal(t.terrain),
+              height: t.elevation || 0,
+              elevation: t.elevation,
+              moisture: t.moisture,
+              temperature: t.temperature,
+              resource: t.resource,
+              features: t.features,
+              location_id: t.location_id,
+              location_name: t.location_name,
+              location_type: locationType,
+              icon: icon,
+              label: t.location_name,
+              properties: t.properties,
+            };
+          });
           
           setMapData({
             tiles,
@@ -178,14 +209,6 @@ export default function WorldMapPage() {
             layout: "pointy",
           });
           setHasHexMap(true);
-          
-          // 加载地点信息
-          const mapResponse = await fetch(`http://localhost:8000/worlds/${worldId}/map`);
-          if (mapResponse.ok) {
-            const mapDataJson = await mapResponse.json();
-            setLocations(mapDataJson.locations || []);
-            setPaths(mapDataJson.paths || []);
-          }
           
           setError("");
           setLoading(false);
