@@ -1133,7 +1133,7 @@ class AIMapGenerateRequest(BaseModel):
     terrain_distribution: Optional[Dict[str, float]] = Field(None, description="地形分布比例")
     height_range: Optional[Dict[str, int]] = Field(None, description="高度范围 {min, max}")
     obstacles: Optional[List[Dict[str, int]]] = Field(None, description="障碍物位置列表 [{q, r}]")
-    resources: Optional[List[Dict[str, any]]] = Field(None, description="资源位置列表 [{q, r, type}]")
+    resources: Optional[List[Dict[str, Union[str, int]]]] = Field(None, description="资源位置列表 [{q, r, type}]")
 
 @app.post("/worlds/{world_id}/ai/generate-map")
 def ai_generate_map(
@@ -1263,7 +1263,7 @@ def ai_generate_map(
 @app.post("/worlds/{world_id}/ai/batch-update-tiles")
 def ai_batch_update_tiles(
     world_id: str,
-    tiles: List[Dict[str, any]],
+    tiles: List[Dict[str, Any]],
     authorization: str = Header(None),
     db: Session = Depends(get_db)
 ):
