@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { WorldAPI, TimelineAPI } from "@/lib/api";
@@ -21,33 +21,80 @@ interface TimelineData {
   timeline: Snapshot[];
 }
 
+interface EventDetail {
+  id: string;
+  type: string;
+  title: string;
+  description?: string;
+  participants?: string[];
+  location_id?: string;
+  outcome?: any;
+  world_changes?: any;
+  created_at?: string;
+}
+
+interface RoleDetail {
+  id: string;
+  name: string;
+  status: string;
+  health: number;
+  influence: number;
+  location_id?: string;
+  card?: any;
+  recent_memories?: {
+    tick: number;
+    type: string;
+    content: string;
+  }[];
+}
+
+interface WorldChange {
+  type: string;
+  description: string;
+  role_id?: string;
+  role_name?: string;
+  from?: string;
+  to?: string;
+  diff?: number;
+}
+
+interface TickDetails {
+  world_id: string;
+  tick: number;
+  world: {
+    tick: number;
+    timestamp?: string;
+    summary?: string;
+    role_count: number;
+    event_count: number;
+    changes_from_previous: WorldChange[];
+  };
+  events: EventDetail[];
+  roles: RoleDetail[];
+  previous_tick?: number;
+}
+
 // 事件类型颜色映射
-const EVENT_TYPE_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  conflict: { bg: "bg-red-100", text: "text-red-700", border: "border-red-300" },
-  decision: { bg: "bg-blue-100", text: "text-blue-700", border: "border-blue-300" },
-  interaction: { bg: "bg-green-100", text: "text-green-700", border: "border-green-300" },
-  movement: { bg: "bg-amber-100", text: "text-amber-700", border: "border-amber-300" },
-  birth: { bg: "bg-pink-100", text: "text-pink-700", border: "border-pink-300" },
-  death: { bg: "bg-gray-100", text: "text-gray-700", border: "border-gray-300" },
-  discovery: { bg: "bg-purple-100", text: "text-purple-700", border: "border-purple-300" },
-  default: { bg: "bg-slate-100", text: "text-slate-700", border: "border-slate-300" },
+const EVENT_TYPE_COLORS: Record<string, { bg: string; text: string; border: string; icon: string }> = {
+  conflict: { bg: "bg-red-100", text: "text-red-700", border: "border-red-300", icon: "⚔️" },
+  decision: { bg: "bg-blue-100", text: "text-blue-700", border: "border-blue-300", icon: "🤔" },
+  interaction: { bg: "bg-green-100", text: "text-green-700", border: "border-green-300", icon: "🤝" },
+  movement: { bg: "bg-amber-100", text: "text-amber-700", border: "border-amber-300", icon: "🚶" },
+  birth: { bg: "bg-pink-100", text: "text-pink-700", border: "border-pink-300", icon: "👶" },
+  death: { bg: "bg-gray-100", text: "text-gray-700", border: "border-gray-300", icon: "💀" },
+  discovery: { bg: "bg-purple-100", text: "text-purple-700", border: "border-purple-300", icon: "🔍" },
+  default: { bg: "bg-slate-100", text: "text-slate-700", border: "border-slate-300", icon: "📌" },
 };
 
-// 事件类型图标
-const EVENT_TYPE_ICONS: Record<string, string> = {
-  conflict: "⚔️",
-  decision: "🤔",
-  interaction: "🤝",
-  movement: "🚶",
-  birth: "👶",
-  death: "💀",
-  discovery: "🔍",
-  default: "📌",
+const ROLE_STATUS_COLORS: Record<string, string> = {
+  ACTIVE: "text-green-400",
+  INACTIVE: "text-gray-400",
+  DECEASED: "text-red-400",
+  MISSING: "text-yellow-400",
 };
 
 export default function WorldTimelinePage() {
   const params = useParams();
-  const router = useRouter();
   const worldId = params.id as string;
 
   const [world, setWorld] = useState<any>(null);
@@ -58,7 +105,11 @@ export default function WorldTimelinePage() {
   const [selectedTick, setSelectedTick] = useState<number | null>(null);
   const [hoveredTick, setHoveredTick] = useState<number | null>(null);
   const [filter, setFilter] = useState<string>("all");
-  const timelineRef = useRef<HTMLDivElement>(null);
+  
+  // Tick 详情
+  const [tickDetails, setTickDetails] = useState<TickDetails | null>(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [activeTab, setActiveTab] = useState<"events" | "roles" | "changes">("events");
 
   const loadData = useCallback(async () => {
     try {
@@ -73,11 +124,9 @@ export default function WorldTimelinePage() {
       const data = timelineRes as TimelineData;
       setTimelineData(data);
       
-      // 按 tick 降序排列
       const sortedSnapshots = (data.timeline || []).sort((a: Snapshot, b: Snapshot) => b.tick - a.tick);
       setSnapshots(sortedSnapshots);
       
-      // 默认选中最新的
       if (sortedSnapshots.length > 0 && !selectedTick) {
         setSelectedTick(sortedSnapshots[0].tick);
       }
@@ -88,9 +137,32 @@ export default function WorldTimelinePage() {
     }
   }, [worldId, selectedTick]);
 
+  // 加载 tick 详情
+  const loadTickDetails = useCallback(async (tick: number) => {
+    if (!tick) return;
+    try {
+      setLoadingDetails(true);
+      const response = await fetch(`http://localhost:8000/worlds/${worldId}/timeline/${tick}`);
+      if (response.ok) {
+        const data = await response.json();
+        setTickDetails(data);
+      }
+    } catch (err) {
+      console.error("Failed to load tick details:", err);
+    } finally {
+      setLoadingDetails(false);
+    }
+  }, [worldId]);
+
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (selectedTick) {
+      loadTickDetails(selectedTick);
+    }
+  }, [selectedTick, loadTickDetails]);
 
   const formatDate = (timestamp: string) => {
     try {
@@ -106,19 +178,8 @@ export default function WorldTimelinePage() {
     }
   };
 
-  const formatRelativeTime = (tick: number, currentTick: number) => {
-    const diff = currentTick - tick;
-    if (diff === 0) return "当前";
-    if (diff === 1) return "1 tick前";
-    return `${diff} ticks前`;
-  };
-
-  const getEventTypeColor = (eventType: string) => {
+  const getEventTypeStyle = (eventType: string) => {
     return EVENT_TYPE_COLORS[eventType] || EVENT_TYPE_COLORS.default;
-  };
-
-  const getEventTypeIcon = (eventType: string) => {
-    return EVENT_TYPE_ICONS[eventType] || EVENT_TYPE_ICONS.default;
   };
 
   const getDominantEventType = (eventTypes?: Record<string, number>) => {
@@ -126,18 +187,11 @@ export default function WorldTimelinePage() {
     return Object.entries(eventTypes).sort((a, b) => b[1] - a[1])[0][0];
   };
 
-  // 过滤快照
   const filteredSnapshots = snapshots.filter((snapshot) => {
     if (filter === "all") return true;
     const dominantType = getDominantEventType(snapshot.event_types);
     return dominantType === filter;
   });
-
-  // 计算进度百分比
-  const getProgressPercent = (tick: number) => {
-    if (!timelineData || timelineData.end_tick === timelineData.start_tick) return 0;
-    return ((tick - timelineData.start_tick) / (timelineData.end_tick - timelineData.start_tick)) * 100;
-  };
 
   if (loading) {
     return (
@@ -198,10 +252,9 @@ export default function WorldTimelinePage() {
               <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
                 {world?.name}
               </h1>
-              <p className="mt-1 text-slate-400">世界时间线</p>
+              <p className="mt-1 text-slate-400">世界时间线 - 探索每个时刻的故事</p>
             </div>
             
-            {/* 当前Tick大数字显示 */}
             <div className="text-right">
               <p className="text-sm text-slate-400 mb-1">当前 Tick</p>
               <div className="relative">
@@ -248,8 +301,8 @@ export default function WorldTimelinePage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* 左侧：时间线可视化 */}
-          <div className="lg:col-span-8">
+          {/* 左侧：时间线列表 */}
+          <div className="lg:col-span-5">
             {filteredSnapshots.length === 0 ? (
               <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-12 text-center">
                 <div className="text-6xl mb-4">📜</div>
@@ -259,108 +312,75 @@ export default function WorldTimelinePage() {
                 </p>
               </div>
             ) : (
-              <div 
-                ref={timelineRef}
-                className="relative bg-slate-800/30 backdrop-blur rounded-2xl border border-slate-700/50 p-8"
-              >
+              <div className="relative bg-slate-800/30 backdrop-blur rounded-2xl border border-slate-700/50 p-6 max-h-[calc(100vh-250px)] overflow-auto">
                 {/* 时间线主轴 */}
-                <div className="absolute left-16 top-8 bottom-8 w-1 bg-gradient-to-b from-blue-500/50 via-purple-500/50 to-blue-500/50 rounded-full"></div>
+                <div className="absolute left-12 top-6 bottom-6 w-0.5 bg-gradient-to-b from-blue-500/50 via-purple-500/50 to-blue-500/50"></div>
                 
                 {/* 时间线节点 */}
-                <div className="space-y-6">
+                <div className="space-y-4">
                   {filteredSnapshots.map((snapshot, index) => {
                     const isSelected = selectedTick === snapshot.tick;
                     const isHovered = hoveredTick === snapshot.tick;
                     const dominantEventType = getDominantEventType(snapshot.event_types);
-                    const eventColors = getEventTypeColor(dominantEventType || "default");
+                    const style = getEventTypeStyle(dominantEventType || "default");
                     const isLatest = index === 0;
                     
                     return (
                       <div
                         key={snapshot.tick}
-                        className={`relative flex items-start gap-6 cursor-pointer transition-all duration-300 ${
+                        className={`relative flex items-start gap-4 cursor-pointer transition-all duration-300 ${
                           isSelected ? "scale-[1.02]" : "hover:scale-[1.01]"
                         }`}
                         onClick={() => setSelectedTick(snapshot.tick)}
                         onMouseEnter={() => setHoveredTick(snapshot.tick)}
                         onMouseLeave={() => setHoveredTick(null)}
                       >
-                        {/* 左侧：Tick标记 */}
-                        <div className="relative flex-shrink-0 w-16 flex flex-col items-center">
-                          {/* 节点圆圈 */}
+                        {/* 节点圆圈 */}
+                        <div className="relative flex-shrink-0 w-8 flex flex-col items-center">
                           <div 
-                            className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300 z-10 ${
+                            className={`w-8 h-8 rounded-full flex items-center justify-center text-xs transition-all duration-300 z-10 ${
                               isSelected
                                 ? "bg-blue-500 text-white shadow-lg shadow-blue-500/50 scale-110"
                                 : isLatest
-                                ? "bg-gradient-to-br from-green-400 to-emerald-500 text-white shadow-lg shadow-green-500/30"
-                                : `${eventColors.bg} ${eventColors.text} border-2 ${eventColors.border}`
+                                ? "bg-gradient-to-br from-green-400 to-emerald-500 text-white"
+                                : `${style.bg} ${style.text} border ${style.border}`
                             }`}
                           >
-                            {isLatest ? "★" : getEventTypeIcon(dominantEventType || "default")}
+                            {isLatest ? "★" : style.icon}
                           </div>
-                          
-                          {/* Tick数字 */}
-                          <span className={`mt-2 text-sm font-mono ${
-                            isSelected ? "text-blue-400" : "text-slate-500"
-                          }`}>
-                            #{snapshot.tick}
-                          </span>
                         </div>
 
-                        {/* 右侧：内容卡片 */}
+                        {/* 内容卡片 */}
                         <div 
-                          className={`flex-1 rounded-xl p-5 transition-all duration-300 border ${
+                          className={`flex-1 rounded-xl p-4 transition-all duration-300 border ${
                             isSelected
-                              ? "bg-slate-700/80 border-blue-500/50 shadow-xl shadow-blue-500/10"
+                              ? "bg-slate-700/80 border-blue-500/50 shadow-lg"
                               : isHovered
                               ? "bg-slate-700/50 border-slate-600/50"
                               : "bg-slate-800/50 border-slate-700/30"
                           }`}
                         >
-                          {/* 头部信息 */}
-                          <div className="flex items-center justify-between mb-3">
-                            <div className="flex items-center gap-3">
-                              {isLatest && (
-                                <span className="px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded-full font-medium">
-                                  最新
-                                </span>
-                              )}
-                              <span className="text-slate-400 text-sm flex items-center gap-1">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                                {formatDate(snapshot.timestamp)}
-                              </span>
-                            </div>
-                            
-                            {snapshot.event_count !== undefined && snapshot.event_count > 0 && (
-                              <span className={`px-3 py-1 rounded-full text-xs font-medium ${eventColors.bg} ${eventColors.text}`}>
-                                {snapshot.event_count} 个事件
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-lg font-bold text-blue-400">#{snapshot.tick}</span>
+                            {isLatest && (
+                              <span className="px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded-full">
+                                最新
                               </span>
                             )}
                           </div>
-
-                          {/* 摘要 */}
-                          <p className={`text-base leading-relaxed ${
-                            isSelected ? "text-white" : "text-slate-300"
-                          }`}>
+                          
+                          <p className="text-slate-300 text-sm line-clamp-2 mb-2">
                             {snapshot.summary || "该时刻没有重要事件记录"}
                           </p>
-
-                          {/* 事件类型分布 */}
-                          {snapshot.event_types && Object.keys(snapshot.event_types).length > 0 && (
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              {Object.entries(snapshot.event_types).map(([type, count]) => (
-                                <span 
-                                  key={type}
-                                  className={`px-2 py-1 rounded text-xs ${getEventTypeColor(type).bg} ${getEventTypeColor(type).text}`}
-                                >
-                                  {getEventTypeIcon(type)} {type}: {count}
-                                </span>
-                              ))}
-                            </div>
-                          )}
+                          
+                          <div className="flex items-center gap-2 text-xs text-slate-500">
+                            <span>{formatDate(snapshot.timestamp)}</span>
+                            {snapshot.event_count ? (
+                              <span className={`px-2 py-0.5 rounded ${style.bg} ${style.text}`}>
+                                {snapshot.event_count} 事件
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                     );
@@ -371,177 +391,239 @@ export default function WorldTimelinePage() {
           </div>
 
           {/* 右侧：详情面板 */}
-          <div className="lg:col-span-4">
-            <div className="sticky top-8 space-y-6">
-              {/* 详情卡片 */}
+          <div className="lg:col-span-7">
+            {loadingDetails ? (
+              <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-12 text-center">
+                <div className="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+                <p className="text-slate-400">加载 Tick #{selectedTick} 详情...</p>
+              </div>
+            ) : tickDetails ? (
               <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 overflow-hidden">
+                {/* 头部 */}
                 <div className="px-6 py-4 border-b border-slate-700/50 bg-gradient-to-r from-slate-800 to-slate-700/50">
-                  <h2 className="text-lg font-semibold flex items-center gap-2">
-                    <span className="text-blue-400">📋</span>
-                    {selectedSnapshot ? `Tick #${selectedTick} 详情` : "选择时刻"}
-                  </h2>
-                </div>
-                
-                {selectedSnapshot ? (
-                  <div className="p-6 space-y-5">
-                    {/* Tick大数字 */}
-                    <div className="text-center p-4 bg-slate-700/30 rounded-xl">
-                      <span className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-cyan-400">
-                        #{selectedSnapshot.tick}
-                      </span>
-                      <p className="text-slate-400 text-sm mt-1">
-                        {formatRelativeTime(selectedSnapshot.tick, world?.current_tick || 0)}
-                      </p>
-                    </div>
-
-                    {/* 时间 */}
+                  <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-sm text-slate-400">记录时间</span>
-                      <p className="text-white flex items-center gap-2 mt-1">
-                        <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                        {formatDate(selectedSnapshot.timestamp)}
+                      <h2 className="text-2xl font-bold text-white">
+                        Tick #{tickDetails.tick} 详情
+                      </h2>
+                      <p className="text-slate-400 text-sm mt-1">
+                        {tickDetails.world.timestamp ? formatDate(tickDetails.world.timestamp) : "未知时间"}
+                        {tickDetails.previous_tick !== undefined && (
+                          <span className="ml-2 text-slate-500">(上一 Tick: #{tickDetails.previous_tick})</span>
+                        )}
                       </p>
                     </div>
-
-                    {/* 事件统计 */}
-                    {selectedSnapshot.event_count !== undefined && (
-                      <div>
-                        <span className="text-sm text-slate-400">事件统计</span>
-                        <div className="mt-2 flex items-center gap-3">
-                          <div className="flex-1 h-2 bg-slate-700 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-gradient-to-r from-blue-500 to-cyan-500 rounded-full"
-                              style={{ width: `${Math.min((selectedSnapshot.event_count / 10) * 100, 100)}%` }}
-                            ></div>
-                          </div>
-                          <span className="text-white font-bold">{selectedSnapshot.event_count}</span>
-                        </div>
+                    <div className="flex gap-3">
+                      <div className="text-center px-4 py-2 bg-slate-700/50 rounded-xl">
+                        <div className="text-2xl font-bold text-blue-400">{tickDetails.world.event_count}</div>
+                        <div className="text-xs text-slate-400">事件</div>
                       </div>
-                    )}
+                      <div className="text-center px-4 py-2 bg-slate-700/50 rounded-xl">
+                        <div className="text-2xl font-bold text-green-400">{tickDetails.world.role_count}</div>
+                        <div className="text-xs text-slate-400">角色</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
 
-                    {/* 事件类型饼图效果 */}
-                    {selectedSnapshot.event_types && Object.keys(selectedSnapshot.event_types).length > 0 && (
-                      <div>
-                        <span className="text-sm text-slate-400">事件分布</span>
-                        <div className="mt-3 space-y-2">
-                          {Object.entries(selectedSnapshot.event_types).map(([type, count]) => {
-                            const colors = getEventTypeColor(type);
-                            const total = Object.values(selectedSnapshot.event_types!).reduce((a, b) => a + b, 0);
-                            const percent = (count / total) * 100;
-                            return (
-                              <div key={type} className="flex items-center gap-3">
-                                <span className="text-lg">{getEventTypeIcon(type)}</span>
+                {/* Tab 切换 */}
+                <div className="flex border-b border-slate-700/50">
+                  {[
+                    { key: "events", label: "📋 事件详情", count: tickDetails.events.length },
+                    { key: "roles", label: "👤 角色状态", count: tickDetails.roles.length },
+                    { key: "changes", label: "📊 世界变化", count: tickDetails.world.changes_from_previous?.length || 0 },
+                  ].map(({ key, label, count }) => (
+                    <button
+                      key={key}
+                      onClick={() => setActiveTab(key as any)}
+                      className={`flex-1 px-4 py-3 text-sm font-medium transition-all ${
+                        activeTab === key
+                          ? "bg-blue-600/20 text-blue-400 border-b-2 border-blue-500"
+                          : "text-slate-400 hover:text-white hover:bg-slate-700/30"
+                      }`}
+                    >
+                      {label}
+                      <span className="ml-2 px-2 py-0.5 bg-slate-700 rounded-full text-xs">{count}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* 内容区域 */}
+                <div className="p-6 max-h-[calc(100vh-400px)] overflow-auto">
+                  {/* 事件详情 Tab */}
+                  {activeTab === "events" && (
+                    <div className="space-y-4">
+                      {tickDetails.events.length === 0 ? (
+                        <p className="text-slate-500 text-center py-8">该 Tick 没有事件发生</p>
+                      ) : (
+                        tickDetails.events.map((event, idx) => {
+                          const style = getEventTypeStyle(event.type);
+                          return (
+                            <div key={event.id} className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30">
+                              <div className="flex items-start gap-3">
+                                <span className={`w-10 h-10 rounded-lg ${style.bg} ${style.text} flex items-center justify-center text-xl flex-shrink-0`}>
+                                  {style.icon}
+                                </span>
                                 <div className="flex-1">
-                                  <div className="flex items-center justify-between text-sm mb-1">
-                                    <span className="text-slate-300 capitalize">{type}</span>
-                                    <span className="text-slate-400">{count} ({Math.round(percent)}%)</span>
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <h3 className="font-semibold text-white">{event.title}</h3>
+                                    <span className={`text-xs px-2 py-0.5 rounded ${style.bg} ${style.text}`}>
+                                      {event.type}
+                                    </span>
                                   </div>
-                                  <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                                    <div 
-                                      className={`h-full rounded-full ${colors.bg.replace('bg-', 'bg-').replace('100', '500')}`}
-                                      style={{ width: `${percent}%` }}
-                                    ></div>
-                                  </div>
+                                  <p className="text-slate-300 text-sm mb-2">{event.description}</p>
+                                  
+                                  {event.participants && event.participants.length > 0 && (
+                                    <div className="flex items-center gap-2 text-xs text-slate-400 mb-2">
+                                      <span>参与者:</span>
+                                      {event.participants.map((p, i) => (
+                                        <span key={i} className="px-2 py-0.5 bg-slate-600/50 rounded">{p}</span>
+                                      ))}
+                                    </div>
+                                  )}
+                                  
+                                  {event.outcome && (
+                                    <div className="mt-2 p-2 bg-slate-800/50 rounded text-sm">
+                                      <span className="text-slate-400">结果: </span>
+                                      <span className="text-slate-300">{JSON.stringify(event.outcome)}</span>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 摘要 */}
-                    <div>
-                      <span className="text-sm text-slate-400">摘要</span>
-                      <p className="text-slate-300 mt-1 text-sm leading-relaxed">
-                        {selectedSnapshot.summary || "该 tick 无详细描述"}
-                      </p>
-                    </div>
-
-                    {/* 操作按钮 */}
-                    <div className="pt-4 border-t border-slate-700/50 space-y-2">
-                      <Link
-                        href={`/worlds/${worldId}?tick=${selectedTick}`}
-                        className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-medium"
-                      >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                        查看该时刻世界状态
-                      </Link>
-                      
-                      {selectedSnapshot.tick > 0 && (
-                        <button
-                          onClick={() => setSelectedTick(selectedSnapshot.tick - 1)}
-                          className="flex items-center justify-center gap-2 w-full px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl transition-all text-sm"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                          </svg>
-                          查看上一时刻
-                        </button>
+                            </div>
+                          );
+                        })
                       )}
                     </div>
-                  </div>
-                ) : (
-                  <div className="px-6 py-12 text-center">
-                    <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-slate-700/50 flex items-center justify-center text-3xl">
-                      👆
-                    </div>
-                    <p className="text-slate-400">点击左侧时间线节点<br/>查看详细信息</p>
-                  </div>
-                )}
-              </div>
+                  )}
 
-              {/* 快捷导航 */}
-              <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-6">
-                <h3 className="text-sm font-semibold text-slate-300 mb-4">快捷导航</h3>
-                <div className="space-y-3">
+                  {/* 角色状态 Tab */}
+                  {activeTab === "roles" && (
+                    <div className="space-y-3">
+                      {tickDetails.roles.length === 0 ? (
+                        <p className="text-slate-500 text-center py-8">暂无角色数据</p>
+                      ) : (
+                        tickDetails.roles.map((role) => (
+                          <div key={role.id} className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-3">
+                                <span className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-lg">
+                                  {role.card?.avatar || "👤"}
+                                </span>
+                                <div>
+                                  <h3 className="font-semibold text-white">{role.name}</h3>
+                                  <span className={`text-xs ${ROLE_STATUS_COLORS[role.status] || "text-slate-400"}`}>
+                                    {role.status}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex gap-4 text-sm">
+                                <div className="text-center">
+                                  <div className="text-red-400 font-bold">{role.health}%</div>
+                                  <div className="text-xs text-slate-500">生命</div>
+                                </div>
+                                <div className="text-center">
+                                  <div className="text-yellow-400 font-bold">{role.influence}</div>
+                                  <div className="text-xs text-slate-500">影响力</div>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {role.recent_memories && role.recent_memories.length > 0 && (
+                              <div className="mt-3 pt-3 border-t border-slate-600/30">
+                                <h4 className="text-xs text-slate-400 mb-2">近期记忆</h4>
+                                <div className="space-y-1">
+                                  {role.recent_memories.map((memory, idx) => (
+                                    <div key={idx} className="text-sm text-slate-300 flex items-center gap-2">
+                                      <span className="text-xs text-slate-500">#{memory.tick}</span>
+                                      <span className="px-1.5 py-0.5 bg-slate-600/50 rounded text-xs">{memory.type}</span>
+                                      <span className="line-clamp-1">{memory.content}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {/* 世界变化 Tab */}
+                  {activeTab === "changes" && (
+                    <div className="space-y-3">
+                      {(!tickDetails.world.changes_from_previous || tickDetails.world.changes_from_previous.length === 0) ? (
+                        <p className="text-slate-500 text-center py-8">与上一 Tick 相比没有显著变化</p>
+                      ) : (
+                        tickDetails.world.changes_from_previous.map((change, idx) => (
+                          <div key={idx} className="bg-slate-700/30 rounded-xl p-4 border border-slate-600/30">
+                            <div className="flex items-center gap-3">
+                              <span className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                                {change.type === "role_status_change" ? "🔄" :
+                                 change.type === "role_health_change" ? "❤️" :
+                                 change.type === "role_count_change" ? "👥" : "📊"}
+                              </span>
+                              <div className="flex-1">
+                                <p className="text-slate-200">
+                                  {change.description || (
+                                    change.type === "role_status_change" ? (
+                                      <>
+                                        <span className="font-semibold text-white">{change.role_name}</span>
+                                        {" 状态从 "}
+                                        <span className="text-slate-400">{change.from}</span>
+                                        {" 变为 "}
+                                        <span className="text-green-400">{change.to}</span>
+                                      </>
+                                    ) : change.type === "role_health_change" ? (
+                                      <>
+                                        <span className="font-semibold text-white">{change.role_name}</span>
+                                        {" 生命值变化 "}
+                                        <span className={change.diff && change.diff > 0 ? "text-green-400" : "text-red-400"}>
+                                          {change.diff && change.diff > 0 ? "+" : ""}{change.diff}
+                                        </span>
+                                      </>
+                                    ) : null
+                                  )}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 底部操作 */}
+                <div className="px-6 py-4 border-t border-slate-700/50 bg-slate-800/30 flex gap-3">
                   <Link
-                    href={`/worlds/${worldId}`}
-                    className="flex items-center gap-3 px-4 py-3 bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 rounded-xl transition-all group"
+                    href={`/worlds/${worldId}?tick=${selectedTick}`}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all font-medium"
                   >
-                    <span className="w-10 h-10 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                      🏠
-                    </span>
-                    <span>世界详情</span>
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    查看世界状态
                   </Link>
-                  <Link
-                    href={`/worlds/${worldId}/map`}
-                    className="flex items-center gap-3 px-4 py-3 bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 rounded-xl transition-all group"
-                  >
-                    <span className="w-10 h-10 rounded-lg bg-green-500/20 text-green-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                      🗺️
-                    </span>
-                    <span>查看地图</span>
-                  </Link>
+                  {tickDetails.previous_tick !== undefined && (
+                    <button
+                      onClick={() => setSelectedTick(tickDetails.previous_tick!)}
+                      className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl transition-all"
+                    >
+                      ← 上一 Tick
+                    </button>
+                  )}
                 </div>
               </div>
-
-              {/* 统计信息 */}
-              {timelineData && (
-                <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-6">
-                  <h3 className="text-sm font-semibold text-slate-300 mb-4">时间线统计</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="text-center p-3 bg-slate-700/30 rounded-xl">
-                      <div className="text-2xl font-bold text-blue-400">{timelineData.start_tick}</div>
-                      <div className="text-xs text-slate-400">起始 Tick</div>
-                    </div>
-                    <div className="text-center p-3 bg-slate-700/30 rounded-xl">
-                      <div className="text-2xl font-bold text-purple-400">{timelineData.end_tick}</div>
-                      <div className="text-xs text-slate-400">结束 Tick</div>
-                    </div>
-                    <div className="text-center p-3 bg-slate-700/30 rounded-xl col-span-2">
-                      <div className="text-2xl font-bold text-green-400">{snapshots.length}</div>
-                      <div className="text-xs text-slate-400">记录总数</div>
-                    </div>
-                  </div>
+            ) : (
+              <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700/50 p-12 text-center">
+                <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-slate-700/50 flex items-center justify-center text-3xl">
+                  👆
                 </div>
-              )}
-            </div>
+                <p className="text-slate-400">点击左侧时间线节点<br/>查看该时刻的详细信息</p>
+              </div>
+            )}
           </div>
         </div>
       </main>

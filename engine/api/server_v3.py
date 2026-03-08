@@ -595,6 +595,142 @@ def get_timeline(
         "timeline": timeline
     }
 
+@app.get("/worlds/{world_id}/timeline/{tick}")
+def get_tick_details(
+    world_id: str,
+    tick: int,
+    db: Session = Depends(get_db)
+):
+    """获取特定 tick 的详细信息（包括事件、角色变化、世界变化）"""
+    world = db.query(WorldORM).filter(WorldORM.id == world_id).first()
+    if not world:
+        raise HTTPException(status_code=404, detail="World not found")
+    
+    # 获取该 tick 的快照
+    snapshot = db.query(WorldSnapshotORM).filter(
+        WorldSnapshotORM.world_id == world_id,
+        WorldSnapshotORM.tick == tick
+    ).first()
+    
+    # 获取该 tick 的所有事件（详细）
+    events = db.query(EventORM).filter(
+        EventORM.world_id == world_id,
+        EventORM.tick == tick
+    ).order_by(EventORM.created_at).all()
+    
+    # 获取角色在该 tick 的状态（对比上一 tick）
+    roles_current = db.query(RoleORM).filter(
+        RoleORM.world_id == world_id
+    ).all()
+    
+    # 获取上一 tick 的快照用于对比
+    prev_snapshot = db.query(WorldSnapshotORM).filter(
+        WorldSnapshotORM.world_id == world_id,
+        WorldSnapshotORM.tick < tick
+    ).order_by(WorldSnapshotORM.tick.desc()).first()
+    
+    # 整理事件详情
+    event_details = []
+    for event in events:
+        event_details.append({
+            "id": event.id,
+            "type": event.type,
+            "title": event.title,
+            "description": event.description,
+            "participants": event.participants,
+            "location_id": event.location_id,
+            "outcome": event.outcome,
+            "world_changes": event.world_changes,
+            "created_at": event.created_at.isoformat() if event.created_at else None,
+        })
+    
+    # 整理角色状态
+    role_details = []
+    for role in roles_current:
+        # 获取该 tick 的角色记忆
+        memories = db.query(RoleMemoryORM).filter(
+            RoleMemoryORM.role_id == role.id,
+            RoleMemoryORM.tick <= tick
+        ).order_by(RoleMemoryORM.tick.desc()).limit(5).all()
+        
+        role_details.append({
+            "id": role.id,
+            "name": role.name,
+            "status": role.status,
+            "health": role.health,
+            "influence": role.influence,
+            "location_id": role.location_id,
+            "card": role.card,
+            "recent_memories": [
+                {
+                    "tick": m.tick,
+                    "type": m.memory_type,
+                    "content": m.content,
+                }
+                for m in memories
+            ]
+        })
+    
+    # 解析快照中的世界状态变化
+    world_state = snapshot.snapshot if snapshot else {}
+    prev_world_state = prev_snapshot.snapshot if prev_snapshot else {}
+    
+    # 计算世界变化
+    world_changes = {
+        "tick": tick,
+        "timestamp": snapshot.created_at.isoformat() if snapshot and snapshot.created_at else None,
+        "summary": snapshot.summary if snapshot else None,
+        "role_count": len(roles_current),
+        "event_count": len(events),
+        "changes_from_previous": _calculate_world_changes(world_state, prev_world_state),
+    }
+    
+    return {
+        "world_id": world_id,
+        "tick": tick,
+        "world": world_changes,
+        "events": event_details,
+        "roles": role_details,
+        "previous_tick": prev_snapshot.tick if prev_snapshot else None,
+    }
+
+def _calculate_world_changes(current: dict, previous: dict) -> list:
+    """计算世界状态的变化"""
+    changes = []
+    
+    # 检查角色数量变化
+    current_roles = current.get("roles", [])
+    previous_roles = previous.get("roles", [])
+    if len(current_roles) != len(previous_roles):
+        changes.append({
+            "type": "role_count_change",
+            "description": f"角色数量从 {len(previous_roles)} 变为 {len(current_roles)}",
+        })
+    
+    # 检查状态变化的角色
+    prev_role_map = {r.get("id"): r for r in previous_roles}
+    for role in current_roles:
+        prev_role = prev_role_map.get(role.get("id"))
+        if prev_role:
+            if role.get("status") != prev_role.get("status"):
+                changes.append({
+                    "type": "role_status_change",
+                    "role_id": role.get("id"),
+                    "role_name": role.get("name"),
+                    "from": prev_role.get("status"),
+                    "to": role.get("status"),
+                })
+            if role.get("health", 100) != prev_role.get("health", 100):
+                health_diff = role.get("health", 100) - prev_role.get("health", 100)
+                changes.append({
+                    "type": "role_health_change",
+                    "role_id": role.get("id"),
+                    "role_name": role.get("name"),
+                    "diff": health_diff,
+                })
+    
+    return changes
+
 # ============ Map Routes ============
 
 @app.get("/worlds/{world_id}/map", response_model=MapDataResponse)
